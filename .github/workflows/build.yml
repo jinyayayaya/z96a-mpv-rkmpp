@@ -300,7 +300,7 @@ jobs:
             } > "${PACKAGE}/share/build-manifest.txt"
 
             tar -C "${WORK}/package" -czf /artifacts/z96a-mpv-rkmpp.tar.gz z96a-mpv-rkmpp
-            sha256sum /artifacts/z96a-mpv-rkmpp.tar.gz > /artifacts/SHA256SUMS
+            (cd /artifacts && sha256sum z96a-mpv-rkmpp.tar.gz) > /artifacts/SHA256SUMS
             cp "${PACKAGE}/share/build-manifest.txt" /artifacts/build-manifest.txt
 
       - name: Upload bundle
