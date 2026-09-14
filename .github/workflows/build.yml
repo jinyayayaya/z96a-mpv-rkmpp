@@ -1,0 +1,312 @@
+name: Build RKMPP mpv
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    name: AArch64 Bookworm build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Check out build recipe
+        uses: actions/checkout@v4
+
+      - name: Build in an AArch64 container
+        uses: uraimo/run-on-arch-action@v3
+        with:
+          arch: aarch64
+          distro: bookworm
+          githubToken: ${{ github.token }}
+          setup: |
+            mkdir -p "${PWD}/artifacts"
+          dockerRunArgs: |
+            --volume "${PWD}/artifacts:/artifacts"
+          install: |
+            apt-get update
+            apt-get install -y --no-install-recommends \
+              autoconf \
+              automake \
+              build-essential \
+              ca-certificates \
+              cmake \
+              git \
+              hwdata \
+              libasound2-dev \
+              libass-dev \
+              libdrm-dev \
+              libegl1-mesa-dev \
+              libgbm-dev \
+              libgl-dev \
+              libgles2-mesa-dev \
+              libpulse-dev \
+              libtool \
+              libx11-dev \
+              libxau-dev \
+              libxcb1-dev \
+              libxext-dev \
+              libxfixes-dev \
+              libxpresent-dev \
+              libxrandr-dev \
+              libxss-dev \
+              libxv-dev \
+              meson \
+              nasm \
+              ninja-build \
+              pkg-config \
+              python3 \
+              python3-pip \
+              texinfo \
+              yasm \
+              zlib1g-dev
+            python3 -m pip install --break-system-packages --no-cache-dir \
+              'meson>=1.3.0,<2'
+          run: |
+            set -eux
+
+            export WORK=/tmp/z96a-mpv-rkmpp
+            export SRC=${WORK}/src
+            export BUILD=${WORK}/build
+            export PREFIX=${WORK}/prefix
+            export PACKAGE=${WORK}/package/z96a-mpv-rkmpp
+            export MPP_REF=0986d01294d5c2449c14cf13af9b740368c33967
+            export FFMPEG_REF=d547c18f18c744bc5e2180ce028fe1a6bd23ddad
+            export LIBPLACEBO_REF=64c1954570f1cd57f8570a57e51fb0249b57bb90
+            export LIBDISPLAY_INFO_REF=c67a3e9bedb05ab61c7443704a1a107e76254595
+            export MPV_REF=8b4d286a3e4f3b730e22cb6e4fea11e5a696a36a
+
+            rm -rf "${WORK}"
+            mkdir -p "${SRC}" "${BUILD}" "${PREFIX}" "${PACKAGE}"
+
+            export PKG_CONFIG_PATH=${PREFIX}/lib/pkgconfig:${PREFIX}/share/pkgconfig
+            export LD_LIBRARY_PATH=${PREFIX}/lib
+            export PATH=${PREFIX}/bin:${PATH}
+
+            fetch_at_ref() {
+              repo=$1
+              ref=$2
+              destination=$3
+              git init "${destination}"
+              git -C "${destination}" remote add origin "${repo}"
+              git -C "${destination}" fetch --depth 1 origin "${ref}"
+              git -C "${destination}" checkout --detach FETCH_HEAD
+            }
+
+            fetch_at_ref \
+              https://github.com/rockchip-linux/mpp.git \
+              "${MPP_REF}" \
+              "${SRC}/mpp"
+
+            fetch_at_ref \
+              https://github.com/nyanmisaka/ffmpeg-rockchip.git \
+              "${FFMPEG_REF}" \
+              "${SRC}/ffmpeg"
+
+            fetch_at_ref \
+              https://github.com/haasn/libplacebo.git \
+              "${LIBPLACEBO_REF}" \
+              "${SRC}/libplacebo"
+            git -C "${SRC}/libplacebo" submodule update --init --depth 1
+
+            fetch_at_ref \
+              https://gitlab.freedesktop.org/emersion/libdisplay-info.git \
+              "${LIBDISPLAY_INFO_REF}" \
+              "${SRC}/libdisplay-info"
+
+            fetch_at_ref \
+              https://github.com/hbiyik/mpv.git \
+              "${MPV_REF}" \
+              "${SRC}/mpv"
+
+            cmake -S "${SRC}/mpp" -B "${BUILD}/mpp" -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_INSTALL_PREFIX="${PREFIX}" \
+              -DCMAKE_INSTALL_LIBDIR=lib \
+              -DBUILD_SHARED_LIBS=ON \
+              -DBUILD_TEST=OFF
+            cmake --build "${BUILD}/mpp" --parallel "$(nproc)"
+            cmake --install "${BUILD}/mpp"
+
+            pkg-config --modversion rockchip_mpp
+
+            meson setup "${BUILD}/libplacebo" "${SRC}/libplacebo" \
+              --prefix="${PREFIX}" \
+              --libdir=lib \
+              --buildtype=release \
+              -Ddefault_library=shared \
+              -Ddemos=false \
+              -Dtests=false \
+              -Dbench=false \
+              -Dfuzz=false \
+              -Dvulkan=disabled \
+              -Dopengl=enabled \
+              -Dgl-proc-addr=enabled \
+              -Dshaderc=disabled \
+              -Dglslang=disabled \
+              -Dlcms=disabled \
+              -Ddovi=disabled \
+              -Dlibdovi=disabled \
+              -Dxxhash=disabled \
+              -Dunwind=disabled
+            meson compile -C "${BUILD}/libplacebo" -j "$(nproc)"
+            meson install -C "${BUILD}/libplacebo"
+
+            pkg-config --modversion libplacebo
+
+            meson setup "${BUILD}/libdisplay-info" "${SRC}/libdisplay-info" \
+              --prefix="${PREFIX}" \
+              --libdir=lib \
+              --buildtype=release
+            meson compile -C "${BUILD}/libdisplay-info" -j "$(nproc)"
+            meson install -C "${BUILD}/libdisplay-info"
+
+            pkg-config --modversion libdisplay-info
+
+            pushd "${SRC}/ffmpeg"
+            ./configure \
+              --prefix="${PREFIX}" \
+              --bindir="${PREFIX}/bin" \
+              --libdir="${PREFIX}/lib" \
+              --shlibdir="${PREFIX}/lib" \
+              --enable-shared \
+              --disable-static \
+              --enable-pic \
+              --enable-gpl \
+              --enable-version3 \
+              --enable-libdrm \
+              --enable-rkmpp \
+              --disable-v4l2-m2m \
+              --disable-vaapi \
+              --disable-vdpau \
+              --disable-vulkan \
+              --disable-debug \
+              --disable-doc \
+              --extra-cflags="-I${PREFIX}/include" \
+              --extra-ldflags="-L${PREFIX}/lib"
+            make -j"$(nproc)"
+            make install
+            popd
+
+            test -x "${PREFIX}/bin/ffmpeg"
+            test -x "${PREFIX}/bin/ffprobe"
+            "${PREFIX}/bin/ffmpeg" -hide_banner -decoders 2>&1 | tee "${WORK}/ffmpeg-decoders.txt"
+            grep -E 'h264_rkmpp|hevc_rkmpp' "${WORK}/ffmpeg-decoders.txt"
+
+            meson setup "${BUILD}/mpv" "${SRC}/mpv" \
+              --prefix="${PREFIX}" \
+              --libdir=lib \
+              --buildtype=release \
+              -Dgpl=true \
+              -Dtests=false \
+              -Dmanpage-build=disabled \
+              -Dhtml-build=disabled \
+              -Dpdf-build=disabled \
+              -Ddrm=enabled \
+              -Dgbm=enabled \
+              -Degl=enabled \
+              -Degl-x11=enabled \
+              -Dgl=enabled \
+              -Dgl-x11=disabled \
+              -Dx11=enabled \
+              -Dwayland=disabled \
+              -Dvulkan=disabled \
+              -Dvaapi=disabled \
+              -Dvaapi-drm=disabled \
+              -Dvaapi-x11=disabled \
+              -Dxv=disabled \
+              -Dsdl2-audio=disabled \
+              -Dsdl2-gamepad=disabled \
+              -Dsdl2-video=disabled \
+              -Dpipewire=disabled \
+              -Djack=disabled \
+              -Dopenal=disabled \
+              -Dlibarchive=disabled \
+              -Dzimg=disabled \
+              -Dzlib=enabled \
+              -Duchardet=disabled
+            meson compile -C "${BUILD}/mpv" -j "$(nproc)"
+            meson install -C "${BUILD}/mpv"
+
+            test -x "${PREFIX}/bin/mpv"
+            "${PREFIX}/bin/mpv" --no-config --hwdec=help 2>&1 | tee "${WORK}/mpv-hwdec.txt"
+            "${PREFIX}/bin/mpv" --no-config --vd=help 2>&1 | tee "${WORK}/mpv-vd.txt"
+            grep -E '(^|[[:space:]])rkmpp([[:space:]]|$)' "${WORK}/mpv-hwdec.txt"
+            grep -E 'h264_rkmpp|hevc_rkmpp' "${WORK}/mpv-vd.txt"
+
+            mkdir -p "${PACKAGE}/bin" "${PACKAGE}/config" "${PACKAGE}/share"
+            cp -a "${PREFIX}/lib" "${PACKAGE}/"
+            cp -a "${PREFIX}/include" "${PACKAGE}/"
+            cp -a "${PREFIX}/share"/. "${PACKAGE}/share/" 2>/dev/null || true
+            cp -a "${PREFIX}/bin/ffmpeg" "${PACKAGE}/bin/ffmpeg.bin"
+            cp -a "${PREFIX}/bin/ffprobe" "${PACKAGE}/bin/ffprobe.bin"
+            cp -a "${PREFIX}/bin/mpv" "${PACKAGE}/bin/mpv.bin"
+
+            cat > "${PACKAGE}/bin/mpv" <<'EOF'
+            #!/bin/sh
+            set -eu
+            HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+            export LD_LIBRARY_PATH="${HERE}/../lib"
+            exec "${HERE}/mpv.bin" "$@"
+            EOF
+            cat > "${PACKAGE}/bin/ffmpeg" <<'EOF'
+            #!/bin/sh
+            set -eu
+            HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+            export LD_LIBRARY_PATH="${HERE}/../lib"
+            exec "${HERE}/ffmpeg.bin" "$@"
+            EOF
+            cat > "${PACKAGE}/bin/ffprobe" <<'EOF'
+            #!/bin/sh
+            set -eu
+            HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+            export LD_LIBRARY_PATH="${HERE}/../lib"
+            exec "${HERE}/ffprobe.bin" "$@"
+            EOF
+            chmod 0755 "${PACKAGE}/bin/mpv" "${PACKAGE}/bin/ffmpeg" "${PACKAGE}/bin/ffprobe"
+
+            cat > "${PACKAGE}/config/mpv.conf" <<'EOF'
+            # RK3568 Z96A: direct Rockchip MPP decode with DRM PRIME frames.
+            vo=gpu
+            gpu-context=x11egl
+            hwdec=rkmpp
+            hwdec-codecs=h264,hevc,vp9
+            video-sync=display-resample
+            interpolation=no
+            dither-depth=auto
+            ao=pulse,alsa
+            demuxer-max-bytes=64MiB
+            demuxer-max-back-bytes=32MiB
+            force-seekable=yes
+            EOF
+
+            cp "${WORK}/ffmpeg-decoders.txt" "${PACKAGE}/share/"
+            cp "${WORK}/mpv-hwdec.txt" "${PACKAGE}/share/"
+            cp "${WORK}/mpv-vd.txt" "${PACKAGE}/share/"
+            {
+              printf 'arch='; uname -m
+              printf 'mpp_ref=%s\n' "${MPP_REF}"
+              printf 'ffmpeg_ref=%s\n' "${FFMPEG_REF}"
+              printf 'libplacebo_ref=%s\n' "${LIBPLACEBO_REF}"
+              printf 'libdisplay_info_ref=%s\n' "${LIBDISPLAY_INFO_REF}"
+              printf 'mpv_ref=%s\n' "${MPV_REF}"
+            } > "${PACKAGE}/share/build-manifest.txt"
+
+            tar -C "${WORK}/package" -czf /artifacts/z96a-mpv-rkmpp.tar.gz z96a-mpv-rkmpp
+            sha256sum /artifacts/z96a-mpv-rkmpp.tar.gz > /artifacts/SHA256SUMS
+            cp "${PACKAGE}/share/build-manifest.txt" /artifacts/build-manifest.txt
+
+      - name: Upload bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: z96a-mpv-rkmpp
+          path: artifacts/*
+          if-no-files-found: error
+          retention-days: 14
