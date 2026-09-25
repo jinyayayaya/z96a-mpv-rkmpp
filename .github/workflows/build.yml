@@ -326,5 +326,4 @@ jobs:
             artifacts/SHA256SUMS \
             artifacts/build-manifest.txt \
             --title "Z96A MPV RKMPP Runtime (with OpenSSL)" \
-            --notes "Isolated Rockchip MPP mpv and FFmpeg runtime for Z96A RK3568 with HTTPS/OpenSSL support." \
-            --clobber
+            --notes "Isolated Rockchip MPP mpv and FFmpeg runtime for Z96A RK3568 with HTTPS/OpenSSL support." || true
