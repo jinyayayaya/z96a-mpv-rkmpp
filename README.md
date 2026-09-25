@@ -48,5 +48,5 @@ It can be pointed at `/opt/z96a-mpv-rkmpp/bin/mpv` after the standalone test.
   `64c1954570f1cd57f8570a57e51fb0249b57bb90`
 - libdisplay-info: tag `0.4.0`, commit
   `c67a3e9bedb05ab61c7443704a1a107e76254595`
-- mpv Rockchip integration: `hbiyik/mpv` branch `mpp`, commit
-  `8b4d286a3e4f3b730e22cb6e4fea11e5a696a36a`
+- mpv Rockchip integration: `jinyayayaya/mpv` branch `mpp`, commit
+  `422b5c5b522754ac229fc5d6d625fada9e939cb0`
