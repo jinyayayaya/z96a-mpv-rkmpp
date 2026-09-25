@@ -7,7 +7,7 @@ on:
       - main
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 jobs:
@@ -48,6 +48,7 @@ jobs:
               libgl-dev \
               libgles2-mesa-dev \
               libpulse-dev \
+              libssl-dev \
               libtool \
               libx11-dev \
               libxau-dev \
@@ -181,6 +182,8 @@ jobs:
               --enable-pic \
               --enable-gpl \
               --enable-version3 \
+              --enable-nonfree \
+              --enable-openssl \
               --enable-libdrm \
               --enable-rkmpp \
               --disable-v4l2-m2m \
@@ -199,6 +202,8 @@ jobs:
             test -x "${PREFIX}/bin/ffprobe"
             "${PREFIX}/bin/ffmpeg" -hide_banner -decoders 2>&1 | tee "${WORK}/ffmpeg-decoders.txt"
             grep -E 'h264_rkmpp|hevc_rkmpp' "${WORK}/ffmpeg-decoders.txt"
+            "${PREFIX}/bin/ffmpeg" -hide_banner -protocols 2>&1 | tee "${WORK}/ffmpeg-protocols.txt"
+            grep -E 'https' "${WORK}/ffmpeg-protocols.txt"
 
             meson setup "${BUILD}/mpv" "${SRC}/mpv" \
               --prefix="${PREFIX}" \
@@ -310,3 +315,16 @@ jobs:
           path: artifacts/*
           if-no-files-found: error
           retention-days: 14
+
+      - name: Publish GitHub Release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v1.0.0 \
+            artifacts/z96a-mpv-rkmpp.tar.gz \
+            artifacts/SHA256SUMS \
+            artifacts/build-manifest.txt \
+            --title "Z96A MPV RKMPP Runtime (with OpenSSL)" \
+            --notes "Isolated Rockchip MPP mpv and FFmpeg runtime for Z96A RK3568 with HTTPS/OpenSSL support." \
+            --clobber
